@@ -1,0 +1,754 @@
+<meta charset="utf-8">
+<title>페달 계기판</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: cockpit — one dominant power gauge, a ring of secondary readouts, live trace, then ride log */
+:root{
+  --bg:#ECEFF2; --surface:#FFFFFF; --ink:#131A21; --muted:#5A6672; --line:#D3DAE0;
+  --power:#E2560E; --cad:#0B8A8A; --hr:#CF2F4A; --spd:#2D5BD0;
+  --ok:#1F8A4C; --warn:#B7791F; --bad:#C0392B;
+  --z1:#8C99A6; --z2:#2D5BD0; --z3:#1F8A4C; --z4:#C9A10C; --z5:#E2560E; --z6:#C0392B;
+  --num:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E1317; --surface:#161E25; --ink:#E6ECF1; --muted:#8A97A4; --line:#26313B;
+  --power:#FF7A33; --cad:#2CC2C2; --hr:#FF5C77; --spd:#6E95FF;
+  --ok:#3FBF77; --warn:#E0A84A; --bad:#FF6B5B;
+  --z1:#7C8996; --z2:#6E95FF; --z3:#3FBF77; --z4:#E3C13A; --z5:#FF7A33; --z6:#FF5B5B;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1317; --surface:#161E25; --ink:#E6ECF1; --muted:#8A97A4; --line:#26313B;
+  --power:#FF7A33; --cad:#2CC2C2; --hr:#FF5C77; --spd:#6E95FF;
+  --ok:#3FBF77; --warn:#E0A84A; --bad:#FF6B5B;
+  --z1:#7C8996; --z2:#6E95FF; --z3:#3FBF77; --z4:#E3C13A; --z5:#FF7A33; --z6:#FF5B5B;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:16px 40px}
+.wrap{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{font-family:var(--num);font-weight:700;font-size:30px;letter-spacing:.02em;margin:0;line-height:1}
+h1 small{font-family:var(--body);font-weight:500;font-size:12px;color:var(--muted);letter-spacing:.08em;margin-left:8px}
+h2{font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 12px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chip.on .dot{background:var(--ok)}
+.chip.demo .dot{background:var(--warn)}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:10px 16px;font-weight:600}
+button:hover{border-color:var(--muted)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--spd);outline-offset:2px}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+button.go{background:var(--power);color:#fff;border-color:var(--power)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.msg{font-size:14px;border-left:3px solid var(--warn);padding:8px 12px;background:var(--surface);border-radius:0 8px 8px 0}
+.msg[data-kind="bad"]{border-color:var(--bad)}
+.msg[data-kind="ok"]{border-color:var(--ok)}
+
+.cockpit{display:grid;grid-template-columns:1.3fr 1fr;gap:12px}
+@media (max-width:640px){.cockpit{grid-template-columns:1fr}}
+.gauge{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:6px;position:relative;overflow:hidden}
+.gauge .lab{font-size:12px;letter-spacing:.1em;color:var(--muted);font-weight:600}
+.big{font-family:var(--num);font-weight:700;font-size:clamp(84px,18vw,140px);line-height:.9;color:var(--power);font-variant-numeric:tabular-nums}
+.big .u{font-size:28px;color:var(--muted);margin-left:6px;font-weight:600}
+.zone{display:flex;align-items:center;gap:10px;font-size:13px}
+.zbar{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;flex:1;max-width:260px}
+.zbar i{height:8px;border-radius:2px;background:var(--line)}
+.zbar i.lit{background:var(--zc)}
+.side{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cell{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.cell .lab{font-size:11px;letter-spacing:.1em;color:var(--muted);font-weight:600;display:flex;justify-content:space-between}
+.val{font-family:var(--num);font-weight:600;font-size:44px;line-height:1;font-variant-numeric:tabular-nums}
+.val .u{font-size:16px;color:var(--muted);margin-left:4px}
+.c-cad .val{color:var(--cad)} .c-hr .val{color:var(--hr)} .c-spd .val{color:var(--spd)}
+.trip{display:grid;grid-template-columns:repeat(4,1fr);gap:0;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.trip div{padding:12px 14px;border-left:1px solid var(--line);min-width:0}
+.trip div:first-child{border-left:0}
+.trip .val{font-size:32px}
+@media (max-width:520px){.trip{grid-template-columns:1fr 1fr}.trip div:nth-child(3){border-left:0}.trip div:nth-child(n+3){border-top:1px solid var(--line)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+.legend b{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+canvas{width:100%;height:200px;display:block}
+.controls{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.controls button{min-width:110px;padding:14px 18px;font-size:16px}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:11px;letter-spacing:.08em;color:var(--muted);font-weight:600}
+th:first-child,td:first-child{text-align:left}
+.tbl{overflow-x:auto}
+.tag{font-size:11px;border:1px solid var(--warn);color:var(--warn);border-radius:4px;padding:0 5px;margin-left:6px}
+td button{padding:4px 8px;font-size:12px;font-weight:500}
+.settings{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:14px}
+.settings label{display:flex;align-items:center;gap:6px}
+input[type=number]{width:84px;font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+details summary{cursor:pointer;font-weight:600}
+details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
+.confirm{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px}
+[hidden]{display:none!important}
+/* ---- 주행 화면 (영상 + 반투명 HUD) ---- */
+#rv{position:fixed;inset:0;z-index:100;background:#000;color:#F4F7FA;font-family:var(--body);overflow:hidden}
+#rvMedia,#rvMedia iframe,#rvMedia video{position:absolute;inset:0;width:100%;height:100%;border:0;object-fit:cover;background:#000}
+#rvMedia .empty{position:absolute;inset:0;display:grid;place-items:center;color:#8A97A4;font-size:15px;text-align:center;padding:24px;
+  background:radial-gradient(ellipse at 50% 120%,#1d3a2a 0%,#0b1218 60%)}
+.hud{position:absolute;inset:0;pointer-events:none}
+.glass{background:rgba(8,12,16,.42);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);border-radius:14px;
+  text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.hud .lab{font-size:11px;letter-spacing:.14em;color:rgba(244,247,250,.7);font-weight:600}
+.hud .n{font-family:var(--num);font-weight:700;line-height:.95;font-variant-numeric:tabular-nums}
+.hud .u{font-size:.38em;color:rgba(244,247,250,.65);margin-left:4px;font-weight:600}
+.h-power{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);padding:8px 26px 10px;text-align:center;min-width:220px;
+  border-bottom:4px solid var(--zc,#8C99A6)}
+.h-power .n{font-size:clamp(56px,7vw,92px)}
+.h-power .zl{font-size:13px;font-weight:600;color:var(--zc,#ccc);letter-spacing:.06em}
+.h-col{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));display:flex;flex-direction:column;gap:8px}
+.h-col.l{left:max(14px,env(safe-area-inset-left,0px))} .h-col.r{right:max(14px,env(safe-area-inset-right,0px));text-align:right}
+.h-col .glass{padding:6px 14px;min-width:120px}
+.h-col .n{font-size:clamp(34px,4vw,48px)}
+.h-cad .n{color:#5FE0DA} .h-hr .n{color:#FF7A8F} .h-spd .n{color:#9DB8FF}
+.h-trace{position:absolute;left:max(14px,env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));padding:8px 10px;width:min(340px,40vw)}
+.h-trace canvas{width:100%;height:70px;display:block}
+.h-bar{position:absolute;right:max(14px,env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));padding:8px;display:flex;gap:6px;align-items:center;
+  pointer-events:auto;transition:opacity .4s}
+.h-bar button{background:rgba(255,255,255,.1);color:#F4F7FA;border:1px solid rgba(255,255,255,.2);padding:8px 12px;font-size:14px;border-radius:10px}
+.h-bar button:hover{background:rgba(255,255,255,.2)}
+.h-bar .tg{font-family:var(--num);font-size:24px;font-weight:700;min-width:84px;text-align:center}
+.h-bar .tg small{display:block;font-family:var(--body);font-size:10px;font-weight:500;color:rgba(244,247,250,.6);letter-spacing:.1em}
+#rv.idle .h-bar{opacity:0} #rv.idle{cursor:none}
+#rv.nohud .hud > *:not(.h-bar){display:none}
+.h-state{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 22px;font-size:20px;font-weight:600}
+@media (max-width:640px){.h-col .glass{min-width:90px}.h-trace{display:none}}
+.vsrc{display:grid;grid-template-columns:1fr auto;gap:8px}
+.vsrc input[type=url]{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);min-width:0}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;border-radius:0;border-left:1px solid var(--line);background:var(--surface);font-size:14px;padding:10px 6px}
+.seg button:first-child{border-left:0}
+.seg button.on{background:var(--ink);color:var(--bg)}
+.stepper{display:flex;align-items:center;justify-content:center;gap:8px}
+.stepper button{width:56px;height:56px;padding:0;font-size:22px}
+.stv{min-width:120px;text-align:center}
+.stv .val{font-size:56px}
+.stv .u{font-size:16px;color:var(--muted);margin-left:4px}
+@media (prefers-reduced-motion:no-preference){.big,.val{transition:color .3s}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>페달 계기판<small>FTMS · CSC · 심박</small></h1>
+    <div class="chips">
+      <span class="chip" id="chipBike"><span class="dot"></span><span id="bikeName">자전거 미연결</span></span>
+      <span class="chip" id="chipHr"><span class="dot"></span><span id="hrName">심박계 미연결</span></span>
+    </div>
+  </header>
+
+  <div class="row">
+    <button class="primary" id="btnBike">자전거 연결</button>
+    <button id="btnHr">심박계 연결</button>
+    <button id="btnDemo">데모 주행</button>
+    <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="allDev"> 목록에 안 뜨면: 모든 기기 보기</label>
+  </div>
+  <div class="msg" id="msg" hidden></div>
+
+  <section class="cockpit">
+    <div class="gauge">
+      <span class="lab">파워 · W</span>
+      <div class="big"><span id="vPow">0</span><span class="u">W</span></div>
+      <div class="zone"><span id="zLabel" style="min-width:110px">Z1 회복</span><div class="zbar" id="zbar"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+      <span style="font-size:12px;color:var(--muted)" id="srcNote">FTP <span id="ftpShow">150</span>W 기준 · 3초 평균<span id="ergShow"></span></span>
+    </div>
+    <div class="side">
+      <div class="cell c-cad"><span class="lab"><span>케이던스</span><span>RPM</span></span><span class="val" id="vCad">0</span></div>
+      <div class="cell c-hr"><span class="lab"><span>심박</span><span>BPM</span></span><span class="val" id="vHr">–</span></div>
+      <div class="cell c-spd"><span class="lab"><span>속도</span><span>km/h</span></span><span class="val" id="vSpd">0.0</span></div>
+      <div class="cell"><span class="lab"><span>저항</span><span>단계</span></span><span class="val" id="vRes">–</span></div>
+    </div>
+  </section>
+
+  <section class="trip">
+    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">운동 시간</span><div class="val" id="tTime">0:00</div></div>
+    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">거리</span><div class="val"><span id="tDist">0.00</span><span class="u">km</span></div></div>
+    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">소모 열량</span><div class="val"><span id="tKcal">0</span><span class="u">kcal</span></div></div>
+    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">평균 파워</span><div class="val"><span id="tAvg">0</span><span class="u">W</span></div></div>
+  </section>
+
+  <div class="controls">
+    <button class="go" id="btnStart">시작</button>
+    <button id="btnPause" disabled>일시정지</button>
+    <button id="btnStop" disabled>종료·저장</button>
+  </div>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2>주행 화면</h2>
+      <span style="font-size:12px;color:var(--muted)">영상 위에 반투명 계기판을 띄웁니다</span>
+    </div>
+    <div class="vsrc">
+      <input type="url" id="ytUrl" placeholder="유튜브 주소 붙여넣기 (예: https://youtu.be/…)">
+      <button id="btnLocal">내 영상 파일</button>
+    </div>
+    <input type="file" id="fileIn" accept="video/*" hidden>
+    <div class="settings">
+      <label><input type="checkbox" id="sync" checked> 페달 속도에 맞춰 영상 재생 속도 조절</label>
+      <label for="refSpd">기준 속도</label><input type="number" id="refSpd" min="10" max="50" value="25"><span style="color:var(--muted)">km/h = 1배속</span>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnRide">전체화면 주행 시작</button>
+      <button id="btnPip">작은 계기판 창 띄우기</button>
+    </div>
+    <span style="font-size:12px;color:var(--muted)" id="vNote">주행 화면 단축키: ↑↓ 저항·ERG 조절 (Shift는 크게), Space 시작·일시정지, H 계기판 숨기기, Esc 나가기</span>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2>저항 제어</h2>
+      <span style="font-size:12px;color:var(--muted)" id="ctrlInfo">자전거를 연결하면 사용할 수 있습니다 (데모에서도 시험 가능)</span>
+    </div>
+    <div class="seg" role="group" aria-label="저항 제어 방식">
+      <button id="mManual" class="on">수동 (다이얼)</button>
+      <button id="mRes">저항 단계</button>
+      <button id="mErg">ERG 목표 파워</button>
+    </div>
+    <div class="stepper" id="stepper" hidden>
+      <button id="stDown10" aria-label="크게 낮추기">−−</button>
+      <button id="stDown" aria-label="낮추기">−</button>
+      <div class="stv"><span class="val" id="stVal">0</span><span class="u" id="stUnit">단계</span></div>
+      <button id="stUp" aria-label="올리기">+</button>
+      <button id="stUp10" aria-label="크게 올리기">++</button>
+    </div>
+    <span style="font-size:12px;color:var(--muted)" id="ctrlNote">수동 모드: 자전거 다이얼로 강도를 조절합니다.</span>
+  </section>
+
+  <section class="panel">
+    <div class="row" style="justify-content:space-between">
+      <h2>최근 5분 추이</h2>
+      <div class="legend"><span><b style="background:var(--power)"></b>파워 W (왼쪽 눈금)</span><span><b style="background:var(--cad)"></b>케이던스</span><span><b style="background:var(--hr)"></b>심박</span></div>
+    </div>
+    <canvas id="chart"></canvas>
+    <span style="font-size:12px;color:var(--muted)" id="chartNote">예시 주행 그래프 — 주행을 시작하면 실제 값으로 바뀝니다</span>
+  </section>
+
+  <section class="panel">
+    <h2>주행 기록</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>날짜</th><th>시간</th><th>거리 km</th><th>평균 W</th><th>최대 W</th><th>평균 RPM</th><th>평균 BPM</th><th>kcal</th><th></th></tr></thead>
+      <tbody id="hist"></tbody>
+    </table></div>
+    <div class="confirm" id="delBox" hidden><span id="delText"></span><button id="delYes">삭제</button><button id="delNo">취소</button></div>
+  </section>
+
+  <section class="panel">
+    <h2>설정</h2>
+    <div class="settings">
+      <label for="ftp">FTP(기준 파워)</label><input type="number" id="ftp" min="50" max="500" value="150"><span style="color:var(--muted)">W</span>
+      <label for="wheel">바퀴 둘레(CSC 센서용)</label><input type="number" id="wheel" min="1000" max="2500" value="2105"><span style="color:var(--muted)">mm</span>
+    </div>
+    <details>
+      <summary>기기·브라우저 호환 안내</summary>
+      <ul>
+        <li>윈도우 노트북: 크롬 또는 엣지에서 바로 연결됩니다.</li>
+        <li>아이폰: 사파리·크롬 모두 웹 블루투스를 지원하지 않습니다. App Store의 <b>Bluefy</b> 브라우저로 이 페이지를 열어야 연결됩니다.</li>
+        <li>안드로이드: 크롬에서 연결됩니다.</li>
+        <li>자전거는 FTMS(피트니스 머신) 또는 CSC(속도·케이던스) 블루투스 방식을 지원해야 합니다. 즈위프트·마이우시에서 ERG 모드가 되는 자전거(베벨로 HL-108A 등)는 FTMS입니다.</li>
+        <li>자전거가 다른 앱(즈위프트·마이우시·키노맵)에 이미 연결돼 있으면 목록에 나타나지 않고 저항 제어도 거부됩니다. 먼저 그 앱을 완전히 종료하세요.</li>
+        <li>베벨로 HL-108A: 페달을 몇 바퀴 돌려 계기판을 깨운 상태에서 연결하세요. 저항 제어가 안 먹히면 다이얼 위치를 바꿔 보고, 그래도 안 되면 수동 모드로 쓰세요.</li>
+        <li>기록은 이 브라우저 안에만 저장됩니다. 다른 기기와 공유되지 않습니다.</li>
+      </ul>
+    </details>
+  </section>
+</div>
+
+<div id="rv" hidden>
+  <div id="rvMedia"><div class="empty">영상을 고르지 않았습니다.<br>계기판만 표시합니다.</div></div>
+  <div class="hud">
+    <div class="h-col l">
+      <div class="glass h-cad"><div class="lab">케이던스 RPM</div><div class="n" id="hCad">0</div></div>
+      <div class="glass h-hr"><div class="lab">심박 BPM</div><div class="n" id="hHr">–</div></div>
+    </div>
+    <div class="glass h-power" id="hPowBox"><div class="lab">파워</div><div class="n"><span id="hPow">0</span><span class="u">W</span></div><div class="zl" id="hZone">Z1 회복</div></div>
+    <div class="h-col r">
+      <div class="glass h-spd"><div class="lab">속도 km/h</div><div class="n" id="hSpd">0.0</div></div>
+      <div class="glass"><div class="lab">거리 km</div><div class="n" id="hDist">0.00</div></div>
+      <div class="glass"><div class="lab">시간</div><div class="n" id="hTime">0:00</div></div>
+      <div class="glass"><div class="lab">kcal</div><div class="n" id="hKcal">0</div></div>
+    </div>
+    <div class="glass h-trace"><div class="lab">파워 · 최근 2분</div><canvas id="hCv"></canvas></div>
+    <div class="glass h-state" id="hState" hidden>일시정지</div>
+    <div class="glass h-bar">
+      <button id="hStart">시작</button>
+      <button id="hDown" aria-label="낮추기">−</button>
+      <div class="tg"><span id="hTg">수동</span><small id="hTgL">저항 모드</small></div>
+      <button id="hUp" aria-label="올리기">+</button>
+      <button id="hMode">모드</button>
+      <button id="hHide">계기판 숨김</button>
+      <button id="hExit">나가기</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+          set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+
+const live={power:0,cad:0,spd:0,hr:null,res:null,devDist:null,last:0,hrLast:0,src:null};
+const ride={state:'idle',elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:null,samples:[],started:null};
+let trace=[]; // {p,c,h}
+let showingExample=true;
+let demoTimer=null, bikeDev=null, hrDev=null, wakeLock=null;
+const powBuf=[];
+
+let ftp=LS.get('ftp',150), wheelMm=LS.get('wheel',2105);
+$('ftp').value=ftp;$('wheel').value=wheelMm;$('ftpShow').textContent=ftp;
+$('ftp').addEventListener('change',e=>{ftp=Math.max(50,+e.target.value||150);LS.set('ftp',ftp);$('ftpShow').textContent=ftp});
+$('wheel').addEventListener('change',e=>{wheelMm=Math.max(1000,+e.target.value||2105);LS.set('wheel',wheelMm)});
+
+function say(t,kind){const m=$('msg');if(!t){m.hidden=true;return}m.textContent=t;m.dataset.kind=kind||'';m.hidden=false}
+
+// ---------- Parsers ----------
+function parseFTMS(dv){
+  let o=0;const f=dv.getUint16(o,true);o+=2;const r={};
+  if(!(f&1)){r.spd=dv.getUint16(o,true)/100;o+=2}
+  if(f&2)o+=2;
+  if(f&4){r.cad=dv.getUint16(o,true)/2;o+=2}
+  if(f&8)o+=2;
+  if(f&16){r.dist=dv.getUint16(o,true)+(dv.getUint8(o+2)<<16);o+=3}
+  if(f&32){r.res=dv.getInt16(o,true);o+=2}
+  if(f&64){r.power=dv.getInt16(o,true);o+=2}
+  if(f&128)o+=2;
+  if(f&256)o+=5;
+  if(f&512){r.hr=dv.getUint8(o);o+=1}
+  return r;
+}
+const csc={wr:null,wt:null,cr:null,ct:null,wLast:0,cLast:0};
+function parseCSC(dv){
+  let o=0;const f=dv.getUint8(o);o+=1;const r={};const now=Date.now();
+  if(f&1){const wr=dv.getUint32(o,true),wt=dv.getUint16(o+4,true);o+=6;
+    if(csc.wr!=null){const dr=wr-csc.wr,dt=((wt-csc.wt+65536)%65536)/1024;
+      if(dt>0&&dr>=0){r.spd=dr*wheelMm/1000/dt*3.6;csc.wLast=now}else if(now-csc.wLast>3000)r.spd=0}
+    csc.wr=wr;csc.wt=wt}
+  if(f&2){const cr=dv.getUint16(o,true),ct=dv.getUint16(o+2,true);o+=4;
+    if(csc.cr!=null){const dr=(cr-csc.cr+65536)%65536,dt=((ct-csc.ct+65536)%65536)/1024;
+      if(dt>0){r.cad=dr/dt*60;csc.cLast=now}else if(now-csc.cLast>3000)r.cad=0}
+    csc.cr=cr;csc.ct=ct}
+  return r;
+}
+function parseHR(dv){const f=dv.getUint8(0);return f&1?dv.getUint16(1,true):dv.getUint8(1)}
+
+function apply(r){
+  if(r.power!=null)live.power=Math.max(0,r.power);
+  if(r.cad!=null)live.cad=r.cad;
+  if(r.spd!=null)live.spd=r.spd;
+  if(r.res!=null)live.res=r.res;
+  if(r.dist!=null)live.devDist=r.dist;
+  if(r.hr!=null&&r.hr>0&&!hrDev){live.hr=r.hr;live.hrLast=Date.now()}
+  live.last=Date.now();
+}
+
+// ---------- Bluetooth ----------
+function btError(e){
+  const n=e&&e.name||'';
+  if(n==='NotFoundError'){say('기기 선택이 취소됐거나 찾지 못했습니다. 자전거 페달을 몇 바퀴 돌려 깨운 뒤 다시 시도하세요. 그래도 안 보이면 “모든 기기 보기”를 켜세요.');return}
+  if(n==='SecurityError'||n==='NotAllowedError'){say('이 화면에서는 블루투스 사용이 막혀 있습니다. 함께 받은 HTML 파일을 노트북의 크롬이나 엣지에서 직접 열어 주세요.','bad');return}
+  say('연결 실패: '+(e&&e.message||e),'bad');
+}
+function btReady(){
+  if(!navigator.bluetooth){
+    const ios=/iPhone|iPad/.test(navigator.userAgent);
+    say(ios?'아이폰 사파리·크롬은 웹 블루투스를 지원하지 않습니다. Bluefy 브라우저 앱으로 이 페이지를 열어 주세요.':'이 브라우저는 웹 블루투스를 지원하지 않습니다. 크롬 또는 엣지를 사용하세요.','bad');
+    return false}
+  return true;
+}
+$('btnBike').addEventListener('click',async()=>{
+  if(!btReady())return; stopDemo(); say('');
+  try{
+    const opt={optionalServices:[0x1826,0x1816,0x180D,0x180A]};
+    if($('allDev').checked)opt.acceptAllDevices=true; else opt.filters=[{services:[0x1826]},{services:[0x1816]}];
+    const dev=await navigator.bluetooth.requestDevice(opt);
+    say('연결 중… '+(dev.name||''));
+    const srv=await dev.gatt.connect();
+    let ok=false;
+    try{const s=await srv.getPrimaryService(0x1826);const ch=await s.getCharacteristic(0x2AD2);
+      ch.addEventListener('characteristicvaluechanged',e=>apply(parseFTMS(e.target.value)));await ch.startNotifications();live.src='FTMS';ok=true;
+      await setupControl(s)}catch(e){}
+    if(!ok){try{const s=await srv.getPrimaryService(0x1816);const ch=await s.getCharacteristic(0x2A5B);
+      ch.addEventListener('characteristicvaluechanged',e=>apply(parseCSC(e.target.value)));await ch.startNotifications();live.src='CSC';ok=true}catch(e){}}
+    if(!ok){dev.gatt.disconnect();say('이 기기에서 FTMS·CSC 데이터를 찾지 못했습니다. 지원 방식을 확인하세요.','bad');return}
+    try{const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
+      ch.addEventListener('characteristicvaluechanged',e=>{if(!hrDev){live.hr=parseHR(e.target.value);live.hrLast=Date.now()}});await ch.startNotifications()}catch(e){}
+    bikeDev=dev;
+    dev.addEventListener('gattserverdisconnected',()=>{bikeDev=null;ctl.cp=null;ctl.has=false;setMode('manual',true);refreshCtrlInfo();setChip('chipBike','bikeName','자전거 연결 끊김','');say('자전거 연결이 끊겼습니다. 다시 연결하면 기록은 이어집니다.')});
+    setChip('chipBike','bikeName',(dev.name||'자전거')+' · '+live.src,'on');
+    say('연결됨. '+(live.src==='CSC'?'CSC 센서는 파워를 보내지 않아 열량은 속도로 추정합니다.':'페달을 밟으면 값이 바로 표시됩니다.'),'ok');
+  }catch(e){btError(e)}
+});
+$('btnHr').addEventListener('click',async()=>{
+  if(!btReady())return; say('');
+  try{
+    const dev=await navigator.bluetooth.requestDevice({filters:[{services:[0x180D]}]});
+    const srv=await dev.gatt.connect();const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
+    ch.addEventListener('characteristicvaluechanged',e=>{live.hr=parseHR(e.target.value);live.hrLast=Date.now()});
+    await ch.startNotifications();hrDev=dev;
+    dev.addEventListener('gattserverdisconnected',()=>{hrDev=null;setChip('chipHr','hrName','심박계 연결 끊김','')});
+    setChip('chipHr','hrName',dev.name||'심박계','on');
+  }catch(e){btError(e)}
+});
+function setChip(c,n,t,cls){$(c).className='chip '+cls;$(n).textContent=t}
+
+// ---------- FTMS 제어 (저항 단계 / ERG) ----------
+const ctl={cp:null,has:false,mode:'manual',res:{min:1,max:24,inc:1,raw10:true},pow:{min:25,max:1000,inc:5},resVal:8,ergVal:120,pending:null};
+async function setupControl(s){
+  try{const r=await (await s.getCharacteristic(0x2AD6)).readValue();
+    ctl.res={min:r.getInt16(0,true)/10,max:r.getInt16(2,true)/10,inc:Math.max(.1,r.getUint16(4,true)/10)};
+    if(ctl.res.max<=ctl.res.min)ctl.res={min:1,max:24,inc:1};
+    if(ctl.res.inc<1&&ctl.res.max>=10)ctl.res.inc=1;}catch(e){}
+  try{const r=await (await s.getCharacteristic(0x2AD8)).readValue();
+    ctl.pow={min:r.getInt16(0,true),max:r.getInt16(2,true),inc:Math.max(1,r.getUint16(4,true))};}catch(e){}
+  try{const cp=await s.getCharacteristic(0x2AD9);
+    cp.addEventListener('characteristicvaluechanged',e=>{const v=e.target.value;
+      if(v.getUint8(0)!==0x80)return;const op=v.getUint8(1),res=v.getUint8(2);
+      if(op===0x00)ctl.has=res===1;
+      if(res!==1)say(({2:'자전거가 이 명령을 지원하지 않습니다.',3:'범위를 벗어난 값입니다.',4:'자전거가 명령을 거부했습니다.',5:'앱 제어 권한이 없습니다. 다른 앱(즈위프트·마이우시)이 연결돼 있으면 끊으세요.'})[res]||'제어 실패(코드 '+res+')','bad');
+      if(ctl.pending){ctl.pending(res);ctl.pending=null}});
+    await cp.startNotifications();ctl.cp=cp;}catch(e){ctl.cp=null}
+  ctl.resVal=clamp(ctl.resVal,ctl.res.min,ctl.res.max);ctl.ergVal=clamp(ctl.ergVal,ctl.pow.min,ctl.pow.max);
+  refreshCtrlInfo();
+}
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+function cpWrite(bytes){
+  return new Promise(async(ok,fail)=>{
+    const t=setTimeout(()=>{ctl.pending=null;ok(0)},1500);
+    ctl.pending=r=>{clearTimeout(t);ok(r)};
+    try{const u=new Uint8Array(bytes);await (ctl.cp.writeValueWithResponse?ctl.cp.writeValueWithResponse(u):ctl.cp.writeValue(u))}
+    catch(e){clearTimeout(t);ctl.pending=null;fail(e)}
+  });
+}
+async function takeControl(){if(ctl.has)return true;const r=await cpWrite([0x00]);if(r===1){ctl.has=true;try{await cpWrite([0x07])}catch(e){}}return ctl.has}
+let sendTimer=null;
+function queueSend(){clearTimeout(sendTimer);sendTimer=setTimeout(sendTarget,250)}
+async function sendTarget(){
+  if(demoTimer||!ctl.cp)return;
+  try{
+    if(!await takeControl())return;
+    if(ctl.mode==='res'){const raw=Math.round(ctl.resVal*10);
+      await cpWrite(raw<=255?[0x04,raw]:[0x04,raw&255,(raw>>8)&255])}
+    else if(ctl.mode==='erg'){const w=Math.round(ctl.ergVal);await cpWrite([0x05,w&255,(w>>8)&255])}
+  }catch(e){say('제어 명령 전송 실패: '+(e.message||e),'bad')}
+}
+async function setMode(m,silent){
+  ctl.mode=m;
+  ['manual','res','erg'].forEach((k,i)=>$(['mManual','mRes','mErg'][i]).classList.toggle('on',k===m));
+  $('stepper').hidden=m==='manual';
+  $('stUnit').textContent=m==='erg'?'W':'단계';
+  $('ctrlNote').textContent={manual:'수동 모드: 자전거 다이얼로 강도를 조절합니다.',
+    res:'저항 단계를 앱에서 고정합니다. 다이얼을 돌리면 자전거가 다이얼 값을 따를 수 있습니다.',
+    erg:'ERG 모드: 페달 속도와 상관없이 목표 파워가 유지되도록 자전거가 저항을 자동 조절합니다.'}[m];
+  renderStep();
+  if(silent)return;
+  if(m==='manual'){if(ctl.cp&&ctl.has&&!demoTimer){try{await cpWrite([0x01])}catch(e){}ctl.has=false}}
+  else queueSend();
+}
+function renderStep(){
+  $('stVal').textContent=ctl.mode==='erg'?Math.round(ctl.ergVal):(+ctl.resVal.toFixed(1));
+  $('ergShow').textContent=ctl.mode==='erg'?' · ERG 목표 '+Math.round(ctl.ergVal)+'W':'';
+}
+function step(dir,big){
+  if(ctl.mode==='erg')ctl.ergVal=clamp(ctl.ergVal+dir*(big?25:5),ctl.pow.min,ctl.pow.max);
+  else if(ctl.mode==='res')ctl.resVal=clamp(+(ctl.resVal+dir*ctl.res.inc*(big?5:1)).toFixed(1),ctl.res.min,ctl.res.max);
+  renderStep();queueSend();
+}
+function refreshCtrlInfo(){
+  const can=demoTimer||ctl.cp;
+  ['mRes','mErg'].forEach(id=>$(id).disabled=!can);
+  if(!can&&ctl.mode!=='manual')setMode('manual',true);
+  $('ctrlInfo').textContent=demoTimer?'데모 제어 중':ctl.cp?`저항 ${ctl.res.min}~${ctl.res.max}단계 · 파워 ${ctl.pow.min}~${ctl.pow.max}W`:
+    (bikeDev?'이 자전거는 앱 제어를 지원하지 않습니다':'자전거를 연결하면 사용할 수 있습니다 (데모에서도 시험 가능)');
+}
+$('mManual').addEventListener('click',()=>setMode('manual'));
+$('mRes').addEventListener('click',()=>setMode('res'));
+$('mErg').addEventListener('click',()=>setMode('erg'));
+$('stUp').addEventListener('click',()=>step(1));$('stDown').addEventListener('click',()=>step(-1));
+$('stUp10').addEventListener('click',()=>step(1,true));$('stDown10').addEventListener('click',()=>step(-1,true));
+
+// ---------- Demo ----------
+let dT=0;
+function startDemo(){
+  if(demoTimer)return;dT=0;live.src='데모';
+  setChip('chipBike','bikeName','데모 자전거','demo');
+  demoTimer=setInterval(()=>{dT+=.5;
+    const surge=Math.sin(dT/40)>0.6?60:0;
+    const cad=82+8*Math.sin(dT/9)+Math.random()*4;
+    let p=135+surge+25*Math.sin(dT/17)+Math.random()*12, res=surge?8:5;
+    if(ctl.mode==='erg'){p=ctl.ergVal+Math.random()*8-4;res=Math.round(ctl.ergVal/cad*0.8)}
+    else if(ctl.mode==='res'){res=ctl.resVal;p=cad*ctl.resVal*0.22+Math.random()*8}
+    apply({power:Math.round(p),cad,spd:cad*0.36,res,hr:Math.round(105+p*0.12+10*Math.sin(dT/30))});
+  },500);
+  refreshCtrlInfo();
+  say('데모 주행 중입니다. 가짜 데이터이며, 시작을 누르면 기록 흐름을 시험해 볼 수 있습니다.');
+}
+function stopDemo(){if(demoTimer){clearInterval(demoTimer);demoTimer=null;setChip('chipBike','bikeName','자전거 미연결','');live.power=live.cad=live.spd=0;live.res=null;live.hr=null;refreshCtrlInfo()}}
+$('btnDemo').addEventListener('click',()=>{demoTimer?(stopDemo(),say('')):startDemo()});
+
+// ---------- Ride control ----------
+async function lockScreen(){try{wakeLock=await navigator.wakeLock.request('screen')}catch(e){}}
+$('btnStart').addEventListener('click',()=>{
+  if(ride.state==='idle'){Object.assign(ride,{elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:live.devDist,samples:[],started:Date.now()});
+    trace=[];showingExample=false;$('chartNote').textContent='실시간 · 1초 간격'}
+  ride.state='run';lockScreen();syncBtns();
+});
+$('btnPause').addEventListener('click',()=>{ride.state='pause';syncBtns()});
+$('btnStop').addEventListener('click',()=>{
+  if(ride.elapsed>=10){
+    const h=LS.get('rides',[]);
+    h.unshift({id:ride.started,date:ride.started,dur:ride.elapsed,dist:ride.dist,avgP:ride.sumP/ride.elapsed,maxP:ride.maxP,
+      avgC:ride.nC?ride.sumC/ride.nC:0,avgH:ride.nH?ride.sumH/ride.nH:null,kcal:kcal(),samples:ride.samples});
+    LS.set('rides',h.slice(0,200));say('주행을 저장했습니다.','ok');
+  }else say('10초 미만 주행은 저장하지 않았습니다.');
+  ride.state='idle';try{wakeLock&&wakeLock.release()}catch(e){}syncBtns();renderHist();
+});
+function syncBtns(){
+  $('btnStart').textContent=ride.state==='pause'?'계속':'시작';
+  $('btnStart').disabled=ride.state==='run';
+  $('btnPause').disabled=ride.state!=='run';
+  $('btnStop').disabled=ride.state==='idle';
+}
+// 사이클링: 사람 효율 약 24% → 기계 일(kJ) ≈ 소모 kcal
+function kcal(){return ride.kj>0?ride.kj:ride.dist/1000*25}
+
+// ---------- 1s tick ----------
+setInterval(()=>{
+  const now=Date.now();
+  if(now-live.last>3000&&!demoTimer){live.power=0;live.cad=0;live.spd=0}
+  if(live.hr!=null&&now-live.hrLast>5000)live.hr=null;
+  powBuf.push(live.power);if(powBuf.length>3)powBuf.shift();
+  if(ride.state==='run'){
+    ride.elapsed++;
+    if(live.devDist!=null&&ride.devDist0!=null&&live.src==='FTMS')ride.dist=Math.max(ride.dist,live.devDist-ride.devDist0);
+    else ride.dist+=live.spd/3.6;
+    ride.kj+=live.power/1000;ride.sumP+=live.power;ride.maxP=Math.max(ride.maxP,live.power);
+    if(live.cad>0){ride.sumC+=live.cad;ride.nC++}
+    if(live.hr){ride.sumH+=live.hr;ride.nH++}
+    if(ride.elapsed%5===0)ride.samples.push([ride.elapsed,Math.round(live.power),Math.round(live.cad),live.hr||'',+(ride.dist/1000).toFixed(3)]);
+    trace.push({p:live.power,c:live.cad,h:live.hr});if(trace.length>300)trace.shift();
+  }else if(!showingExample&&ride.state==='idle'&&(bikeDev||demoTimer)){
+    trace.push({p:live.power,c:live.cad,h:live.hr});if(trace.length>300)trace.shift();
+  }
+  render();
+},1000);
+
+const zones=[[0,.55,'Z1 회복'],[.55,.75,'Z2 지구력'],[.75,.9,'Z3 템포'],[.9,1.05,'Z4 역치'],[1.05,1.2,'Z5 VO2max'],[1.2,99,'Z6 무산소']];
+function fmtT(s){const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return(h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0')}
+function render(){
+  const p3=Math.round(powBuf.reduce((a,b)=>a+b,0)/(powBuf.length||1));
+  $('vPow').textContent=p3;
+  $('vCad').textContent=Math.round(live.cad);
+  $('vSpd').textContent=live.spd.toFixed(1);
+  $('vHr').textContent=live.hr||'–';
+  $('vRes').textContent=live.res==null?'–':live.res;
+  const r=p3/ftp;let zi=zones.findIndex(z=>r>=z[0]&&r<z[1]);if(zi<0)zi=0;
+  $('zLabel').textContent=zones[zi][2];
+  [...$('zbar').children].forEach((el,i)=>{el.className=i<=zi&&p3>0?'lit':'';el.style.setProperty('--zc','var(--z'+(zi+1)+')')});
+  $('tTime').textContent=fmtT(ride.elapsed);
+  $('tDist').textContent=(ride.dist/1000).toFixed(2);
+  $('tKcal').textContent=Math.round(kcal());
+  $('tAvg').textContent=ride.elapsed?Math.round(ride.sumP/ride.elapsed):0;
+  draw();renderHud(p3,zi);
+}
+
+// ---------- Chart ----------
+const cv=$('chart'),ctx=cv.getContext('2d');
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function draw(){
+  const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;
+  if(cv.width!==W*dpr){cv.width=W*dpr;cv.height=H*dpr}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+  const L=34,R=8,T=8,B=18,w=W-L-R,h=H-T-B;
+  const data=trace;const maxP=Math.max(250,...data.map(d=>d.p));const top=Math.ceil(maxP/100)*100;
+  ctx.font='11px '+css('--num');ctx.fillStyle=css('--muted');ctx.strokeStyle=css('--line');ctx.lineWidth=1;
+  for(let v=0;v<=top;v+=100){const y=T+h-(v/top)*h;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(L+w,y);ctx.stroke();ctx.textAlign='right';ctx.fillText(v,L-6,y+4)}
+  ctx.textAlign='left';ctx.fillText('-5분',L,H-3);ctx.textAlign='right';ctx.fillText('지금',L+w,H-3);
+  if(data.length<2)return;
+  const x=i=>L+w*(i+300-data.length)/299;
+  // power area
+  ctx.beginPath();data.forEach((d,i)=>{const y=T+h-(d.p/top)*h;i?ctx.lineTo(x(i),y):ctx.moveTo(x(i),y)});
+  ctx.strokeStyle=css('--power');ctx.lineWidth=2;ctx.stroke();
+  ctx.lineTo(x(data.length-1),T+h);ctx.lineTo(x(0),T+h);ctx.closePath();ctx.globalAlpha=.15;ctx.fillStyle=css('--power');ctx.fill();ctx.globalAlpha=1;
+  const line=(key,col,scale)=>{ctx.beginPath();let s=false;data.forEach((d,i)=>{const v=d[key];if(v==null){s=false;return}const y=T+h-(v/scale)*h;s?ctx.lineTo(x(i),y):ctx.moveTo(x(i),y);s=true});ctx.strokeStyle=css(col);ctx.lineWidth=1.5;ctx.stroke()};
+  line('c','--cad',top*0.6);line('h','--hr',top*0.8);
+  const last=data[data.length-1];ctx.beginPath();ctx.arc(x(data.length-1),T+h-(last.p/top)*h,3.5,0,7);ctx.fillStyle=css('--power');ctx.fill();
+}
+window.addEventListener('resize',draw);
+// example trace at rest
+for(let i=0;i<300;i++){const s=Math.sin(i/40)>0.6?55:0;trace.push({p:130+s+22*Math.sin(i/17)+((i*37)%11),c:84+7*Math.sin(i/9),h:120+s*0.5+9*Math.sin(i/30)})}
+
+// ---------- 주행 화면: 영상 + HUD ----------
+const rv=$('rv');let media=null; // {type:'yt'|'file', el}
+let fileUrl=null, lastRate=null, lastPlay=null;
+let refSpd=LS.get('refSpd',25);$('refSpd').value=refSpd;
+$('refSpd').addEventListener('change',e=>{refSpd=clamp(+e.target.value||25,10,50);LS.set('refSpd',refSpd)});
+$('sync').checked=LS.get('sync',true);$('sync').addEventListener('change',e=>{LS.set('sync',e.target.checked);if(!e.target.checked)setRate(1,true)});
+try{$('ytUrl').value=LS.get('ytUrl','')}catch(e){}
+function ytId(u){const m=String(u).match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/|\/live\/)([\w-]{11})/);return m?m[1]:(/^[\w-]{11}$/.test(u.trim())?u.trim():null)}
+$('btnLocal').addEventListener('click',()=>$('fileIn').click());
+$('fileIn').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
+  if(fileUrl)URL.revokeObjectURL(fileUrl);fileUrl=URL.createObjectURL(f);$('ytUrl').value='';
+  $('vNote').textContent='선택한 영상: '+f.name;});
+function buildMedia(){
+  const box=$('rvMedia');box.innerHTML='';media=null;lastRate=null;lastPlay=null;
+  const id=ytId($('ytUrl').value);
+  if(id){LS.set('ytUrl',$('ytUrl').value);
+    const f=document.createElement('iframe');
+    f.src=`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&loop=1&playlist=${id}&modestbranding=1`;
+    f.allow='autoplay; fullscreen; encrypted-media';f.referrerPolicy='strict-origin-when-cross-origin';
+    box.appendChild(f);media={type:'yt',el:f};
+  }else if(fileUrl){
+    const v=document.createElement('video');v.src=fileUrl;v.loop=true;v.playsInline=true;v.autoplay=true;
+    box.appendChild(v);media={type:'file',el:v};v.play().catch(()=>{});
+  }else box.innerHTML='<div class="empty">영상을 고르지 않았습니다.<br>계기판만 표시합니다.</div>';
+}
+function ytCmd(func,args){try{media.el.contentWindow.postMessage(JSON.stringify({event:'command',func,args:args||[]}),'*')}catch(e){}}
+function setRate(r,force){
+  if(!media)return;
+  if(media.type==='yt'){const steps=[.25,.5,.75,1,1.25,1.5,1.75,2];r=steps.reduce((a,b)=>Math.abs(b-r)<Math.abs(a-r)?b:a);
+    if(force||r!==lastRate){ytCmd('setPlaybackRate',[r]);lastRate=r}}
+  else{r=Math.round(r*20)/20;if(force||r!==lastRate){media.el.playbackRate=r;lastRate=r}}
+}
+function setPlay(on){
+  if(!media||on===lastPlay)return;lastPlay=on;
+  if(media.type==='yt')ytCmd(on?'playVideo':'pauseVideo');else on?media.el.play().catch(()=>{}):media.el.pause();
+}
+function syncVideo(){
+  if(rv.hidden||!media||!$('sync').checked)return;
+  if(live.spd<3){setPlay(false);return}
+  setPlay(true);setRate(clamp(live.spd/refSpd,.5,2));
+}
+setInterval(syncVideo,1500);
+
+$('btnRide').addEventListener('click',async()=>{
+  buildMedia();rv.hidden=false;wake();
+  try{await rv.requestFullscreen({navigationUI:'hide'})}catch(e){}
+  renderHudCtl();render();
+});
+function exitRide(){rv.hidden=true;$('rvMedia').innerHTML='';media=null;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
+$('hExit').addEventListener('click',exitRide);
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&!rv.hidden)exitRide()});
+$('hHide').addEventListener('click',()=>rv.classList.toggle('nohud'));
+$('hStart').addEventListener('click',toggleRun);
+function toggleRun(){ride.state==='run'?$('btnPause').click():$('btnStart').click();renderHudCtl()}
+$('hUp').addEventListener('click',()=>step(1));$('hDown').addEventListener('click',()=>step(-1));
+$('hMode').addEventListener('click',()=>{const order=['manual','res','erg'].filter(m=>m==='manual'||!$(m==='res'?'mRes':'mErg').disabled);
+  setMode(order[(order.indexOf(ctl.mode)+1)%order.length]);renderHudCtl()});
+document.addEventListener('keydown',e=>{
+  if(rv.hidden||e.target.tagName==='INPUT')return;
+  if(e.key==='ArrowUp'){step(1,e.shiftKey);e.preventDefault()}
+  else if(e.key==='ArrowDown'){step(-1,e.shiftKey);e.preventDefault()}
+  else if(e.key===' '){toggleRun();e.preventDefault()}
+  else if(e.key==='h'||e.key==='H'||e.key==='ㅗ')rv.classList.toggle('nohud');
+  else if(e.key==='Escape')exitRide();
+  renderHudCtl();
+});
+let idleT=null;
+rv.addEventListener('pointermove',()=>{rv.classList.remove('idle');clearTimeout(idleT);idleT=setTimeout(()=>rv.classList.add('idle'),3000)});
+async function wake(){try{if(!wakeLock||wakeLock.released)wakeLock=await navigator.wakeLock.request('screen')}catch(e){}}
+
+function renderHudCtl(){
+  $('hStart').textContent=ride.state==='run'?'일시정지':(ride.state==='pause'?'계속':'시작');
+  $('hTg').textContent=ctl.mode==='erg'?Math.round(ctl.ergVal)+'W':ctl.mode==='res'?(+ctl.resVal.toFixed(1)):'수동';
+  $('hTgL').textContent=ctl.mode==='erg'?'ERG 목표':ctl.mode==='res'?'저항 단계':'다이얼 조절';
+  const dis=ctl.mode==='manual';$('hUp').disabled=dis;$('hDown').disabled=dis;
+  $('hState').hidden=ride.state!=='pause';
+  if(pip)pipCtl();
+}
+const zoneVar=i=>css('--z'+(i+1));
+function renderHud(p3,zi){
+  const show=!rv.hidden;
+  if(show){
+    $('hPow').textContent=p3;$('hZone').textContent=zones[zi][2]+(ctl.mode==='erg'?' · 목표 '+Math.round(ctl.ergVal)+'W':'');
+    $('hPowBox').style.setProperty('--zc',zoneVar(zi));
+    $('hCad').textContent=Math.round(live.cad);$('hHr').textContent=live.hr||'–';$('hSpd').textContent=live.spd.toFixed(1);
+    $('hDist').textContent=(ride.dist/1000).toFixed(2);$('hTime').textContent=fmtT(ride.elapsed);$('hKcal').textContent=Math.round(kcal());
+    renderHudCtl();spark($('hCv'),zi);
+  }
+  if(pip)pipRender(p3,zi);
+}
+function spark(c,zi){
+  const g=c.getContext('2d'),dpr=window.devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;if(!W)return;
+  if(c.width!==W*dpr){c.width=W*dpr;c.height=H*dpr}g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+  const d=trace.slice(-120);if(d.length<2)return;const top=Math.max(200,ftp*1.3,...d.map(x=>x.p));
+  const ftpY=H-(ftp/top)*H;g.strokeStyle='rgba(255,255,255,.35)';g.setLineDash([3,4]);g.beginPath();g.moveTo(0,ftpY);g.lineTo(W,ftpY);g.stroke();g.setLineDash([]);
+  g.fillStyle='rgba(255,255,255,.55)';g.font='10px sans-serif';g.fillText('FTP',2,ftpY-3);
+  g.beginPath();d.forEach((x,i)=>{const X=W*(i+120-d.length)/119,Y=H-(x.p/top)*H;i?g.lineTo(X,Y):g.moveTo(X,Y)});
+  g.strokeStyle=zoneVar(zi);g.lineWidth=2;g.stroke();
+}
+
+// ---------- 작은 계기판 창 (항상 위, Document Picture-in-Picture) ----------
+let pip=null,pe={};
+$('btnPip').addEventListener('click',async()=>{
+  if(!('documentPictureInPicture' in window)){say('이 브라우저는 작은 계기판 창을 지원하지 않습니다. 엣지나 크롬 최신 버전에서 열어 주세요.','bad');return}
+  if(pip){pip.close();return}
+  try{pip=await documentPictureInPicture.requestWindow({width:300,height:250})}
+  catch(e){say('작은 창을 열 수 없습니다. 이 화면이 다른 페이지 안에 들어가 있으면 막힙니다. 받은 HTML 파일을 엣지에서 직접 열어 주세요.','bad');return}
+  const d=pip.document;
+  d.head.innerHTML=`<meta charset="utf-8"><title>페달 계기판</title><style>
+  body{margin:0;background:#0B1116;color:#F4F7FA;font-family:"IBM Plex Sans KR","Malgun Gothic",sans-serif;display:flex;flex-direction:column;height:100vh}
+  .p{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-bottom:5px solid var(--zc,#8C99A6)}
+  .n{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:700;line-height:.95;font-variant-numeric:tabular-nums}
+  .p .n{font-size:68px}.u{font-size:18px;opacity:.6;margin-left:3px}
+  .z{font-size:12px;font-weight:600;color:var(--zc)}
+  .g{display:grid;grid-template-columns:repeat(4,1fr);text-align:center;padding:6px 4px}
+  .g .n{font-size:26px}.l{font-size:9px;letter-spacing:.1em;opacity:.65}
+  .c{color:#5FE0DA}.h{color:#FF7A8F}.s{color:#9DB8FF}
+  .b{display:flex;gap:4px;padding:6px;justify-content:center;align-items:center}
+  button{background:#1E2A33;color:#F4F7FA;border:1px solid #33424E;border-radius:8px;padding:5px 10px;font:inherit;font-size:13px;cursor:pointer}
+  .t{min-width:64px;text-align:center;font-family:"Barlow Condensed",sans-serif;font-size:20px;font-weight:700}</style>`;
+  d.body.innerHTML=`<div class="p" id="pp"><div class="n"><span id="pw">0</span><span class="u">W</span></div><div class="z" id="pz"></div></div>
+   <div class="g"><div><div class="l">RPM</div><div class="n c" id="pc">0</div></div><div><div class="l">BPM</div><div class="n h" id="ph">–</div></div>
+   <div><div class="l">km/h</div><div class="n s" id="ps">0</div></div><div><div class="l">시간</div><div class="n" id="pt">0:00</div></div></div>
+   <div class="b"><button id="pr">시작</button><button id="pd">−</button><span class="t" id="pg">수동</span><button id="pu">+</button><button id="pm">모드</button></div>`;
+  ['pp','pw','pz','pc','ph','ps','pt','pr','pg','pd','pu','pm'].forEach(k=>pe[k]=d.getElementById(k));
+  pe.pr.onclick=toggleRun;pe.pd.onclick=()=>{step(-1);renderHudCtl()};pe.pu.onclick=()=>{step(1);renderHudCtl()};pe.pm.onclick=()=>$('hMode').click();
+  pip.addEventListener('pagehide',()=>{pip=null;pe={};$('btnPip').textContent='작은 계기판 창 띄우기'});
+  $('btnPip').textContent='작은 계기판 창 닫기';
+  say('작은 계기판 창을 띄웠습니다. 이제 다른 탭에서 유튜브를 전체화면으로 틀어도 창이 위에 떠 있습니다. 창은 마우스로 옮기거나 크기를 바꿀 수 있습니다.','ok');
+  pipCtl();render();
+});
+function pipRender(p3,zi){
+  pe.pw.textContent=p3;pe.pz.textContent=zones[zi][2]+(ctl.mode==='erg'?' · 목표 '+Math.round(ctl.ergVal)+'W':'');
+  pe.pp.style.setProperty('--zc',zoneVar(zi));pe.pc.textContent=Math.round(live.cad);pe.ph.textContent=live.hr||'–';
+  pe.ps.textContent=live.spd.toFixed(1);pe.pt.textContent=fmtT(ride.elapsed);
+}
+function pipCtl(){if(!pe.pr)return;pe.pr.textContent=ride.state==='run'?'일시정지':(ride.state==='pause'?'계속':'시작');
+  pe.pg.textContent=ctl.mode==='erg'?Math.round(ctl.ergVal)+'W':ctl.mode==='res'?(+ctl.resVal.toFixed(1)):'수동';}
+
+// ---------- History ----------
+const examples=[
+  {id:'ex1',date:Date.now()-86400000*2,dur:1820,dist:10400,avgP:128,maxP:241,avgC:82,avgH:126,kcal:233,ex:true},
+  {id:'ex2',date:Date.now()-86400000*4,dur:2710,dist:15900,avgP:121,maxP:265,avgC:79,avgH:121,kcal:328,ex:true}];
+let pendingDel=null;
+function renderHist(){
+  const h=LS.get('rides',[]);const rows=h.length?h:examples;
+  $('hist').innerHTML=rows.map(r=>{const d=new Date(r.date);
+    return `<tr><td>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}${r.ex?'<span class="tag">예시</span>':''}</td>
+    <td>${fmtT(r.dur)}</td><td>${(r.dist/1000).toFixed(2)}</td><td>${Math.round(r.avgP)}</td><td>${Math.round(r.maxP)}</td>
+    <td>${Math.round(r.avgC)}</td><td>${r.avgH?Math.round(r.avgH):'–'}</td><td>${Math.round(r.kcal)}</td>
+    <td>${r.ex?'':`<button data-csv="${r.id}">CSV 복사</button> <button data-del="${r.id}">삭제</button>`}</td></tr>`}).join('');
+}
+$('hist').addEventListener('click',async e=>{
+  const c=e.target.dataset.csv,d=e.target.dataset.del;const h=LS.get('rides',[]);
+  if(c){const r=h.find(x=>String(x.id)===c);if(!r)return;
+    const txt='초,파워W,케이던스,심박,누적km\n'+(r.samples||[]).map(s=>s.join(',')).join('\n');
+    try{await navigator.clipboard.writeText(txt);e.target.textContent='복사됨'}catch(err){say('복사가 막혀 있습니다. 이 브라우저에서는 CSV 복사를 쓸 수 없습니다.','bad')}}
+  if(d){pendingDel=d;const r=h.find(x=>String(x.id)===d);$('delText').textContent=new Date(r.date).toLocaleString('ko-KR')+' 기록을 삭제할까요?';$('delBox').hidden=false}
+});
+$('delYes').addEventListener('click',()=>{LS.set('rides',LS.get('rides',[]).filter(x=>String(x.id)!==pendingDel));$('delBox').hidden=true;renderHist()});
+$('delNo').addEventListener('click',()=>{$('delBox').hidden=true});
+
+if(!navigator.bluetooth&&/iPhone|iPad/.test(navigator.userAgent))say('아이폰 사파리·크롬은 웹 블루투스를 지원하지 않습니다. Bluefy 브라우저 앱으로 열거나, 노트북 크롬에서 열어 주세요. 데모 주행은 지금 바로 볼 수 있습니다.');
+renderHist();syncBtns();setMode('manual',true);refreshCtrlInfo();render();
+})();
+</script>
