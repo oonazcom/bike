@@ -86,6 +86,7 @@ th:first-child,td:first-child{text-align:left}
 td button{padding:4px 8px;font-size:12px;font-weight:500}
 .settings{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:14px}
 .settings label{display:flex;align-items:center;gap:6px}
+select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 input[type=number]{width:84px;font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 details summary{cursor:pointer;font-weight:600}
 details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
@@ -172,7 +173,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
   <section class="trip">
     <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">운동 시간</span><div class="val" id="tTime">0:00</div></div>
     <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">거리</span><div class="val"><span id="tDist">0.00</span><span class="u">km</span></div></div>
-    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">소모 열량</span><div class="val"><span id="tKcal">0</span><span class="u">kcal</span></div></div>
+    <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">소모 열량</span><div class="val"><span id="tKcal">0</span><span class="u">kcal</span></div><div style="font-size:12px;color:var(--hr)" id="tHrKcal">심박 기준 –</div></div>
     <div><span class="lab" style="font-size:11px;color:var(--muted);letter-spacing:.1em;font-weight:600">평균 파워</span><div class="val"><span id="tAvg">0</span><span class="u">W</span></div></div>
   </section>
 
@@ -235,7 +236,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
   <section class="panel">
     <h2>주행 기록</h2>
     <div class="tbl"><table>
-      <thead><tr><th>날짜</th><th>시간</th><th>거리 km</th><th>평균 W</th><th>최대 W</th><th>평균 RPM</th><th>평균 BPM</th><th>kcal</th><th></th></tr></thead>
+      <thead><tr><th>날짜</th><th>시간</th><th>거리 km</th><th>평균 W</th><th>최대 W</th><th>평균 RPM</th><th>평균 BPM</th><th>kcal 파워</th><th>kcal 심박</th><th></th></tr></thead>
       <tbody id="hist"></tbody>
     </table></div>
     <div class="confirm" id="delBox" hidden><span id="delText"></span><button id="delYes">삭제</button><button id="delNo">취소</button></div>
@@ -246,6 +247,13 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
     <div class="settings">
       <label for="ftp">FTP(기준 파워)</label><input type="number" id="ftp" min="50" max="500" value="150"><span style="color:var(--muted)">W</span>
       <label for="wheel">바퀴 둘레(CSC 센서용)</label><input type="number" id="wheel" min="1000" max="2500" value="2105"><span style="color:var(--muted)">mm</span>
+    </div>
+    <div class="settings">
+      <label for="wt">체중</label><input type="number" id="wt" min="30" max="200" step="0.1" placeholder="입력"><span style="color:var(--muted)">kg</span>
+      <label for="age">나이(만)</label><input type="number" id="age" min="10" max="100" placeholder="입력"><span style="color:var(--muted)">세</span>
+      <label for="sex">성별</label><select id="sex"><option value="m">남</option><option value="f">여</option></select>
+    </div>
+    <div style="font-size:12px;color:var(--muted)" id="hrKcalNote">체중·나이를 넣고 심박계를 연결하면 심박 기준 칼로리(애플워치와 같은 방식)를 파워 기준과 나란히 보여줍니다. 기초대사분을 뺀 활동 칼로리입니다.
     </div>
     <details>
       <summary>기기·브라우저 호환 안내</summary>
@@ -297,7 +305,7 @@ const LS={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:JSON.par
           set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 
 const live={power:0,cad:0,spd:0,hr:null,res:null,devDist:null,last:0,hrLast:0,src:null};
-const ride={state:'idle',elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:null,samples:[],started:null};
+const ride={state:'idle',hrKcal:0,elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:null,samples:[],started:null};
 let trace=[]; // {p,c,h}
 let showingExample=true;
 let demoTimer=null, bikeDev=null, hrDev=null, wakeLock=null;
@@ -497,7 +505,7 @@ $('btnDemo').addEventListener('click',()=>{demoTimer?(stopDemo(),say('')):startD
 // ---------- Ride control ----------
 async function lockScreen(){try{wakeLock=await navigator.wakeLock.request('screen')}catch(e){}}
 $('btnStart').addEventListener('click',()=>{
-  if(ride.state==='idle'){Object.assign(ride,{elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:live.devDist,samples:[],started:Date.now()});
+  if(ride.state==='idle'){Object.assign(ride,{hrKcal:0,elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:live.devDist,samples:[],started:Date.now()});
     trace=[];showingExample=false;$('chartNote').textContent='실시간 · 1초 간격'}
   ride.state='run';lockScreen();syncBtns();
 });
@@ -506,7 +514,7 @@ $('btnStop').addEventListener('click',()=>{
   if(ride.elapsed>=10){
     const h=LS.get('rides',[]);
     h.unshift({id:ride.started,date:ride.started,dur:ride.elapsed,dist:ride.dist,avgP:ride.sumP/ride.elapsed,maxP:ride.maxP,
-      avgC:ride.nC?ride.sumC/ride.nC:0,avgH:ride.nH?ride.sumH/ride.nH:null,kcal:kcal(),samples:ride.samples});
+      avgC:ride.nC?ride.sumC/ride.nC:0,avgH:ride.nH?ride.sumH/ride.nH:null,kcal:kcal(),hrKcal:ride.nH&&hrReady()?ride.hrKcal:null,samples:ride.samples});
     LS.set('rides',h.slice(0,200));say('주행을 저장했습니다.','ok');
   }else say('10초 미만 주행은 저장하지 않았습니다.');
   ride.state='idle';try{wakeLock&&wakeLock.release()}catch(e){}syncBtns();renderHist();
@@ -519,6 +527,18 @@ function syncBtns(){
 }
 // 사이클링: 사람 효율 약 24% → 기계 일(kJ) ≈ 소모 kcal
 function kcal(){return ride.kj>0?ride.kj:ride.dist/1000*25}
+// 심박 기준 (Keytel 2005 공식, 총 소모) − 안정 시 소모(체중×1kcal/kg/시간) = 활동 칼로리
+const body={wt:LS.get('wt',null),age:LS.get('age',null),sex:LS.get('sex','m')};
+if(body.wt)$('wt').value=body.wt;if(body.age)$('age').value=body.age;$('sex').value=body.sex;
+$('wt').addEventListener('change',e=>{body.wt=+e.target.value||null;LS.set('wt',body.wt)});
+$('age').addEventListener('change',e=>{body.age=+e.target.value||null;LS.set('age',body.age)});
+$('sex').addEventListener('change',e=>{body.sex=e.target.value;LS.set('sex',body.sex)});
+function hrReady(){return body.wt>0&&body.age>0}
+function hrKcalPerMin(hr){
+  const g=body.sex==='f'?(-20.4022+0.4472*hr-0.1263*body.wt+0.074*body.age):(-55.0969+0.6309*hr+0.1988*body.wt+0.2017*body.age);
+  return Math.max(0,g/4.184-body.wt/60);
+}
+function hrKcalText(){return !hrReady()?'심박 기준: 설정에 체중·나이 입력':!ride.nH?'심박 기준: 심박계 연결 필요':'심박 기준 '+Math.round(ride.hrKcal)+' kcal'}
 
 // ---------- 1s tick ----------
 setInterval(()=>{
@@ -532,7 +552,7 @@ setInterval(()=>{
     else ride.dist+=live.spd/3.6;
     ride.kj+=live.power/1000;ride.sumP+=live.power;ride.maxP=Math.max(ride.maxP,live.power);
     if(live.cad>0){ride.sumC+=live.cad;ride.nC++}
-    if(live.hr){ride.sumH+=live.hr;ride.nH++}
+    if(live.hr){ride.sumH+=live.hr;ride.nH++;if(hrReady())ride.hrKcal+=hrKcalPerMin(live.hr)/60}
     if(ride.elapsed%5===0)ride.samples.push([ride.elapsed,Math.round(live.power),Math.round(live.cad),live.hr||'',+(ride.dist/1000).toFixed(3)]);
     trace.push({p:live.power,c:live.cad,h:live.hr});if(trace.length>300)trace.shift();
   }else if(!showingExample&&ride.state==='idle'&&(bikeDev||demoTimer)){
@@ -555,7 +575,7 @@ function render(){
   [...$('zbar').children].forEach((el,i)=>{el.className=i<=zi&&p3>0?'lit':'';el.style.setProperty('--zc','var(--z'+(zi+1)+')')});
   $('tTime').textContent=fmtT(ride.elapsed);
   $('tDist').textContent=(ride.dist/1000).toFixed(2);
-  $('tKcal').textContent=Math.round(kcal());
+  $('tKcal').textContent=Math.round(kcal());$('tHrKcal').textContent=hrKcalText();
   $('tAvg').textContent=ride.elapsed?Math.round(ride.sumP/ride.elapsed):0;
   draw();renderHud(p3,zi);
 }
@@ -735,7 +755,7 @@ function renderHist(){
   $('hist').innerHTML=rows.map(r=>{const d=new Date(r.date);
     return `<tr><td>${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}${r.ex?'<span class="tag">예시</span>':''}</td>
     <td>${fmtT(r.dur)}</td><td>${(r.dist/1000).toFixed(2)}</td><td>${Math.round(r.avgP)}</td><td>${Math.round(r.maxP)}</td>
-    <td>${Math.round(r.avgC)}</td><td>${r.avgH?Math.round(r.avgH):'–'}</td><td>${Math.round(r.kcal)}</td>
+    <td>${Math.round(r.avgC)}</td><td>${r.avgH?Math.round(r.avgH):'–'}</td><td>${Math.round(r.kcal)}</td><td>${r.hrKcal!=null?Math.round(r.hrKcal):'–'}</td>
     <td>${r.ex?'':`<button data-csv="${r.id}">CSV 복사</button> <button data-del="${r.id}">삭제</button>`}</td></tr>`}).join('');
 }
 $('hist').addEventListener('click',async e=>{
