@@ -292,6 +292,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
       <div class="tg"><span id="hTg">수동</span><small id="hTgL">저항 모드</small></div>
       <button id="hUp" aria-label="올리기">+</button>
       <button id="hMode">모드</button>
+      <button id="hRestart">영상 처음으로</button>
       <button id="hHide">계기판 숨김</button>
       <button id="hExit">나가기</button>
     </div>
@@ -608,7 +609,7 @@ for(let i=0;i<300;i++){const s=Math.sin(i/40)>0.6?55:0;trace.push({p:130+s+22*Ma
 
 // ---------- 주행 화면: 영상 + HUD ----------
 const rv=$('rv');let media=null; // {type:'yt'|'file', el}
-let fileUrl=null, lastRate=null, lastPlay=null;
+let fileUrl=null, fileKey=null, lastRate=null, lastPlay=null;
 let refSpd=LS.get('refSpd',25);$('refSpd').value=refSpd;
 $('refSpd').addEventListener('change',e=>{refSpd=clamp(+e.target.value||25,10,50);LS.set('refSpd',refSpd)});
 $('sync').checked=LS.get('sync',true);$('sync').addEventListener('change',e=>{LS.set('sync',e.target.checked);if(!e.target.checked)setRate(1,true)});
@@ -616,19 +617,23 @@ try{$('ytUrl').value=LS.get('ytUrl','')}catch(e){}
 function ytId(u){const m=String(u).match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/|\/live\/)([\w-]{11})/);return m?m[1]:(/^[\w-]{11}$/.test(u.trim())?u.trim():null)}
 $('btnLocal').addEventListener('click',()=>$('fileIn').click());
 $('fileIn').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
-  if(fileUrl)URL.revokeObjectURL(fileUrl);fileUrl=URL.createObjectURL(f);$('ytUrl').value='';
+  if(fileUrl)URL.revokeObjectURL(fileUrl);fileUrl=URL.createObjectURL(f);fileKey='f:'+f.name+':'+f.size;$('ytUrl').value='';
   $('vNote').textContent='선택한 영상: '+f.name;});
 function buildMedia(){
   const box=$('rvMedia');box.innerHTML='';media=null;lastRate=null;lastPlay=null;
   const id=ytId($('ytUrl').value);
+  const key=id?'yt:'+id:(fileUrl?fileKey:null);
+  const start=key?(LS.get('vpos',{})[key]||0):0; // 지난번에 멈춘 위치(초)
   if(id){LS.set('ytUrl',$('ytUrl').value);
     const f=document.createElement('iframe');
-    f.src=`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&loop=1&playlist=${id}&modestbranding=1`;
+    f.src=`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&loop=1&playlist=${id}&modestbranding=1`+(start>5?`&start=${Math.floor(start)}`:'');
     f.allow='autoplay; fullscreen; encrypted-media';f.referrerPolicy='strict-origin-when-cross-origin';
-    box.appendChild(f);media={type:'yt',el:f};
+    box.appendChild(f);media={type:'yt',el:f,key,t:start,heard:false};
+    f.addEventListener('load',ytListen);
   }else if(fileUrl){
     const v=document.createElement('video');v.src=fileUrl;v.loop=true;v.playsInline=true;v.autoplay=true;
-    box.appendChild(v);media={type:'file',el:v};v.play().catch(()=>{});
+    v.addEventListener('loadedmetadata',()=>{if(start>5&&start<v.duration-5)v.currentTime=start});
+    box.appendChild(v);media={type:'file',el:v,key,t:start};v.play().catch(()=>{});
   }else box.innerHTML='<div class="empty">영상을 고르지 않았습니다.<br>계기판만 표시합니다.</div>';
 }
 function ytCmd(func,args){try{media.el.contentWindow.postMessage(JSON.stringify({event:'command',func,args:args||[]}),'*')}catch(e){}}
@@ -642,8 +647,33 @@ function setPlay(on){
   if(!media||on===lastPlay)return;lastPlay=on;
   if(media.type==='yt')ytCmd(on?'playVideo':'pauseVideo');else on?media.el.play().catch(()=>{}):media.el.pause();
 }
+// 유튜브 플레이어가 현재 재생 위치를 알려주도록 요청하고 받아 둔다
+function ytListen(){try{media&&media.type==='yt'&&media.el.contentWindow.postMessage(JSON.stringify({event:'listening',id:1,channel:'widget'}),'*')}catch(e){}}
+window.addEventListener('message',e=>{
+  if(!media||media.type!=='yt'||e.source!==media.el.contentWindow)return;
+  try{const d=typeof e.data==='string'?JSON.parse(e.data):e.data;
+    if(d&&d.info&&typeof d.info.currentTime==='number'){media.t=d.info.currentTime;media.heard=true}}catch(err){}
+});
+function savePos(){
+  if(!media||!media.key)return;
+  if(media.type==='file'){if(!media.el.currentTime)return;media.t=media.el.currentTime}
+  else if(!media.heard)return;
+  const m=LS.get('vpos',{});delete m[media.key];m[media.key]=Math.floor(media.t);
+  const ks=Object.keys(m);while(ks.length>30)delete m[ks.shift()];
+  LS.set('vpos',m);
+}
+function seekStart(){
+  if(!media)return;
+  if(media.type==='yt')ytCmd('seekTo',[0,true]);else media.el.currentTime=0;
+  media.t=0;const m=LS.get('vpos',{});delete m[media.key];LS.set('vpos',m);
+}
+window.addEventListener('pagehide',savePos);
 function syncVideo(){
-  if(rv.hidden||!media||!$('sync').checked)return;
+  if(rv.hidden||!media)return;
+  if(media.type==='yt'&&!media.heard)ytListen();
+  savePos();
+  if(ride.state==='pause'){setPlay(false);return}
+  if(!$('sync').checked){setPlay(true);return}
   if(live.spd<3){setPlay(false);return}
   setPlay(true);setRate(clamp(live.spd/refSpd,.5,2));
 }
@@ -654,12 +684,14 @@ $('btnRide').addEventListener('click',async()=>{
   try{await rv.requestFullscreen({navigationUI:'hide'})}catch(e){}
   renderHudCtl();render();
 });
-function exitRide(){rv.hidden=true;$('rvMedia').innerHTML='';media=null;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
+function exitRide(){savePos();rv.hidden=true;$('rvMedia').innerHTML='';media=null;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
 $('hExit').addEventListener('click',exitRide);
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&!rv.hidden)exitRide()});
 $('hHide').addEventListener('click',()=>rv.classList.toggle('nohud'));
 $('hStart').addEventListener('click',toggleRun);
-function toggleRun(){ride.state==='run'?$('btnPause').click():$('btnStart').click();renderHudCtl()}
+function toggleRun(){ride.state==='run'?$('btnPause').click():$('btnStart').click();renderHudCtl();syncVideo()}
+$('hRestart').addEventListener('click',seekStart);
+rv.addEventListener('click',e=>{if(e.target.tagName==='BUTTON')e.target.blur()}); // Space가 버튼을 다시 누르지 않게
 $('hUp').addEventListener('click',()=>step(1));$('hDown').addEventListener('click',()=>step(-1));
 $('hMode').addEventListener('click',()=>{const order=['manual','res','erg'].filter(m=>m==='manual'||!$(m==='res'?'mRes':'mErg').disabled);
   setMode(order[(order.indexOf(ctl.mode)+1)%order.length]);renderHudCtl()});
