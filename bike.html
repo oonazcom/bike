@@ -122,6 +122,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 .h-bar .tg small{display:block;font-family:var(--body);font-size:10px;font-weight:500;color:rgba(244,247,250,.6);letter-spacing:.1em}
 #rv.idle .h-bar{opacity:0} #rv.idle{cursor:none}
 #rv.nohud .hud > *:not(.h-bar){display:none}
+.h-warn{position:absolute;top:calc(150px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);padding:6px 14px;font-size:14px;font-weight:600;color:#FFD27A;white-space:nowrap}
 .h-state{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);padding:14px 22px;font-size:20px;font-weight:600}
 @media (max-width:640px){.h-col .glass{min-width:90px}.h-trace{display:none}}
 .vsrc{display:grid;grid-template-columns:1fr auto;gap:8px}
@@ -265,6 +266,8 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
         <li>자전거가 다른 앱(즈위프트·마이우시·키노맵)에 이미 연결돼 있으면 목록에 나타나지 않고 저항 제어도 거부됩니다. 먼저 그 앱을 완전히 종료하세요.</li>
         <li>베벨로 HL-108A: 페달을 몇 바퀴 돌려 계기판을 깨운 상태에서 연결하세요. 저항 제어가 안 먹히면 다이얼 위치를 바꿔 보고, 그래도 안 되면 수동 모드로 쓰세요.</li>
         <li>기록은 이 브라우저 안에만 저장됩니다. 다른 기기와 공유되지 않습니다.</li>
+        <li>블루투스가 끊기면 자동으로 다시 연결을 시도합니다(최대 약 1분). 자전거가 끊기면 주행이 자동 일시정지되고, 다시 붙으면 이어서 기록합니다.</li>
+        <li>주행 중 페이지를 새로 고치거나 브라우저가 꺼져도 진행 중이던 기록은 남아 있다가 “계속”으로 이어집니다.</li>
       </ul>
     </details>
   </section>
@@ -286,6 +289,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
     </div>
     <div class="glass h-trace"><div class="lab">파워 · 최근 2분</div><canvas id="hCv"></canvas></div>
     <div class="glass h-state" id="hState" hidden>일시정지</div>
+    <div class="glass h-warn" id="hWarn" hidden></div>
     <div class="glass h-bar">
       <button id="hStart">시작</button>
       <button id="hDown" aria-label="낮추기">−</button>
@@ -293,6 +297,7 @@ details ul{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
       <button id="hUp" aria-label="올리기">+</button>
       <button id="hMode">모드</button>
       <button id="hRestart">영상 처음으로</button>
+      <button id="hFull" hidden>전체화면</button>
       <button id="hHide">계기판 숨김</button>
       <button id="hExit">나가기</button>
     </div>
@@ -373,6 +378,53 @@ function btReady(){
     return false}
   return true;
 }
+function hook(ch,fn){if(!ch._hk){ch.addEventListener('characteristicvaluechanged',fn);ch._hk=true}return ch.startNotifications()}
+async function hookBike(dev){
+  const srv=await dev.gatt.connect();
+  let ok=false;
+  try{const s=await srv.getPrimaryService(0x1826);const ch=await s.getCharacteristic(0x2AD2);
+    await hook(ch,e=>apply(parseFTMS(e.target.value)));live.src='FTMS';ok=true;
+    await setupControl(s)}catch(e){}
+  if(!ok){try{const s=await srv.getPrimaryService(0x1816);const ch=await s.getCharacteristic(0x2A5B);
+    csc.wr=csc.cr=null;await hook(ch,e=>apply(parseCSC(e.target.value)));live.src='CSC';ok=true}catch(e){}}
+  if(!ok){try{dev.gatt.disconnect()}catch(e){}throw new Error('nodata')}
+  try{const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
+    await hook(ch,e=>{if(!hrDev){live.hr=parseHR(e.target.value);live.hrLast=Date.now()}})}catch(e){}
+  bikeDev=dev;live.last=Date.now();
+  if(!dev._dc){dev._dc=true;dev.addEventListener('gattserverdisconnected',()=>{
+    bikeDev=null;ctl.cp=null;ctl.has=false;setMode('manual',true);refreshCtrlInfo();
+    if(ride.state==='run'){ride.state='pause';ride.autoPaused=true;ride.lastDev=null;syncBtns();renderHudCtl();saveNow()}
+    reconnect('bike')})}
+  setChip('chipBike','bikeName',(dev.name||'자전거')+' · '+live.src,'on');
+  if(ride.autoPaused&&ride.state==='pause'){ride.state='run';ride.autoPaused=false;ride.lastDev=null;syncBtns();renderHudCtl()}
+  connWarn();
+}
+async function hookHr(dev){
+  const srv=await dev.gatt.connect();const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
+  await hook(ch,e=>{live.hr=parseHR(e.target.value);live.hrLast=Date.now()});hrDev=dev;
+  if(!dev._dc){dev._dc=true;dev.addEventListener('gattserverdisconnected',()=>{hrDev=null;reconnect('hr')})}
+  setChip('chipHr','hrName',dev.name||'심박계','on');connWarn();
+}
+// 끊기면 같은 기기에 3초 간격으로 최대 20번 다시 붙는다 (기기 선택 창 없이)
+const want={bike:null,hr:null},retry={bike:0,hr:0};
+async function reconnect(kind){
+  const dev=want[kind];if(!dev)return;
+  const chip=kind==='bike'?['chipBike','bikeName','자전거']:['chipHr','hrName','심박계'];
+  for(let i=1;i<=20;i++){
+    if(want[kind]!==dev)return;
+    retry[kind]=i;setChip(chip[0],chip[1],chip[2]+' 재연결 중… '+i+'/20','demo');connWarn();
+    try{await (kind==='bike'?hookBike(dev):hookHr(dev));retry[kind]=0;connWarn();say(chip[2]+' 다시 연결됐습니다. 기록은 이어집니다.','ok');return}catch(e){}
+    await new Promise(r=>setTimeout(r,3000));
+  }
+  retry[kind]=-1;setChip(chip[0],chip[1],chip[2]+' 연결 끊김','');connWarn();
+  say(chip[2]+' 자동 재연결에 실패했습니다. 기기를 깨운 뒤 “'+chip[2]+' 연결” 버튼을 다시 눌러 주세요. 기록은 그대로 남아 있습니다.','bad');
+}
+function connWarn(){
+  const t=[];
+  if(retry.bike>0)t.push('자전거 재연결 중…');else if(retry.bike<0)t.push('자전거 연결 끊김');
+  if(retry.hr>0)t.push('심박계 재연결 중…');else if(retry.hr<0)t.push('심박계 연결 끊김');
+  $('hWarn').textContent=t.join(' · ');$('hWarn').hidden=!t.length;
+}
 $('btnBike').addEventListener('click',async()=>{
   if(!btReady())return; stopDemo(); say('');
   try{
@@ -380,19 +432,8 @@ $('btnBike').addEventListener('click',async()=>{
     if($('allDev').checked)opt.acceptAllDevices=true; else opt.filters=[{services:[0x1826]},{services:[0x1816]}];
     const dev=await navigator.bluetooth.requestDevice(opt);
     say('연결 중… '+(dev.name||''));
-    const srv=await dev.gatt.connect();
-    let ok=false;
-    try{const s=await srv.getPrimaryService(0x1826);const ch=await s.getCharacteristic(0x2AD2);
-      ch.addEventListener('characteristicvaluechanged',e=>apply(parseFTMS(e.target.value)));await ch.startNotifications();live.src='FTMS';ok=true;
-      await setupControl(s)}catch(e){}
-    if(!ok){try{const s=await srv.getPrimaryService(0x1816);const ch=await s.getCharacteristic(0x2A5B);
-      ch.addEventListener('characteristicvaluechanged',e=>apply(parseCSC(e.target.value)));await ch.startNotifications();live.src='CSC';ok=true}catch(e){}}
-    if(!ok){dev.gatt.disconnect();say('이 기기에서 FTMS·CSC 데이터를 찾지 못했습니다. 지원 방식을 확인하세요.','bad');return}
-    try{const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
-      ch.addEventListener('characteristicvaluechanged',e=>{if(!hrDev){live.hr=parseHR(e.target.value);live.hrLast=Date.now()}});await ch.startNotifications()}catch(e){}
-    bikeDev=dev;
-    dev.addEventListener('gattserverdisconnected',()=>{bikeDev=null;ctl.cp=null;ctl.has=false;setMode('manual',true);refreshCtrlInfo();setChip('chipBike','bikeName','자전거 연결 끊김','');say('자전거 연결이 끊겼습니다. 다시 연결하면 기록은 이어집니다.')});
-    setChip('chipBike','bikeName',(dev.name||'자전거')+' · '+live.src,'on');
+    want.bike=dev;retry.bike=0;
+    try{await hookBike(dev)}catch(e){if(e.message==='nodata'){want.bike=null;say('이 기기에서 FTMS·CSC 데이터를 찾지 못했습니다. 지원 방식을 확인하세요.','bad');return}throw e}
     say('연결됨. '+(live.src==='CSC'?'CSC 센서는 파워를 보내지 않아 열량은 속도로 추정합니다.':'페달을 밟으면 값이 바로 표시됩니다.'),'ok');
   }catch(e){btError(e)}
 });
@@ -400,11 +441,7 @@ $('btnHr').addEventListener('click',async()=>{
   if(!btReady())return; say('');
   try{
     const dev=await navigator.bluetooth.requestDevice({filters:[{services:[0x180D]}]});
-    const srv=await dev.gatt.connect();const s=await srv.getPrimaryService(0x180D);const ch=await s.getCharacteristic(0x2A37);
-    ch.addEventListener('characteristicvaluechanged',e=>{live.hr=parseHR(e.target.value);live.hrLast=Date.now()});
-    await ch.startNotifications();hrDev=dev;
-    dev.addEventListener('gattserverdisconnected',()=>{hrDev=null;setChip('chipHr','hrName','심박계 연결 끊김','')});
-    setChip('chipHr','hrName',dev.name||'심박계','on');
+    want.hr=dev;retry.hr=0;await hookHr(dev);
   }catch(e){btError(e)}
 });
 function setChip(c,n,t,cls){$(c).className='chip '+cls;$(n).textContent=t}
@@ -419,11 +456,11 @@ async function setupControl(s){
   try{const r=await (await s.getCharacteristic(0x2AD8)).readValue();
     ctl.pow={min:r.getInt16(0,true),max:r.getInt16(2,true),inc:Math.max(1,r.getUint16(4,true))};}catch(e){}
   try{const cp=await s.getCharacteristic(0x2AD9);
-    cp.addEventListener('characteristicvaluechanged',e=>{const v=e.target.value;
+    if(!cp._hk){cp._hk=true;cp.addEventListener('characteristicvaluechanged',e=>{const v=e.target.value;
       if(v.getUint8(0)!==0x80)return;const op=v.getUint8(1),res=v.getUint8(2);
       if(op===0x00)ctl.has=res===1;
       if(res!==1)say(({2:'자전거가 이 명령을 지원하지 않습니다.',3:'범위를 벗어난 값입니다.',4:'자전거가 명령을 거부했습니다.',5:'앱 제어 권한이 없습니다. 다른 앱(즈위프트·마이우시)이 연결돼 있으면 끊으세요.'})[res]||'제어 실패(코드 '+res+')','bad');
-      if(ctl.pending){ctl.pending(res);ctl.pending=null}});
+      if(ctl.pending){ctl.pending(res);ctl.pending=null}})}
     await cp.startNotifications();ctl.cp=cp;}catch(e){ctl.cp=null}
   ctl.resVal=clamp(ctl.resVal,ctl.res.min,ctl.res.max);ctl.ergVal=clamp(ctl.ergVal,ctl.pow.min,ctl.pow.max);
   refreshCtrlInfo();
@@ -506,11 +543,11 @@ $('btnDemo').addEventListener('click',()=>{demoTimer?(stopDemo(),say('')):startD
 // ---------- Ride control ----------
 async function lockScreen(){try{wakeLock=await navigator.wakeLock.request('screen')}catch(e){}}
 $('btnStart').addEventListener('click',()=>{
-  if(ride.state==='idle'){Object.assign(ride,{hrKcal:0,elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,devDist0:live.devDist,samples:[],started:Date.now()});
+  if(ride.state==='idle'){Object.assign(ride,{hrKcal:0,elapsed:0,dist:0,kj:0,sumP:0,sumC:0,nC:0,sumH:0,nH:0,maxP:0,lastDev:null,samples:[],started:Date.now()});
     trace=[];showingExample=false;$('chartNote').textContent='실시간 · 1초 간격'}
-  ride.state='run';lockScreen();syncBtns();
+  ride.state='run';ride.autoPaused=false;ride.lastDev=null;lockScreen();syncBtns();saveNow();
 });
-$('btnPause').addEventListener('click',()=>{ride.state='pause';syncBtns()});
+$('btnPause').addEventListener('click',()=>{ride.state='pause';ride.autoPaused=false;ride.lastDev=null;syncBtns();saveNow()});
 $('btnStop').addEventListener('click',()=>{
   if(ride.elapsed>=10){
     const h=LS.get('rides',[]);
@@ -518,7 +555,7 @@ $('btnStop').addEventListener('click',()=>{
       avgC:ride.nC?ride.sumC/ride.nC:0,avgH:ride.nH?ride.sumH/ride.nH:null,kcal:kcal(),hrKcal:ride.nH&&hrReady()?ride.hrKcal:null,samples:ride.samples});
     LS.set('rides',h.slice(0,200));say('주행을 저장했습니다.','ok');
   }else say('10초 미만 주행은 저장하지 않았습니다.');
-  ride.state='idle';try{wakeLock&&wakeLock.release()}catch(e){}syncBtns();renderHist();
+  ride.state='idle';ride.autoPaused=false;saveNow();try{wakeLock&&wakeLock.release()}catch(e){}syncBtns();renderHist();
 });
 function syncBtns(){
   $('btnStart').textContent=ride.state==='pause'?'계속':'시작';
@@ -526,6 +563,21 @@ function syncBtns(){
   $('btnPause').disabled=ride.state!=='run';
   $('btnStop').disabled=ride.state==='idle';
 }
+// 진행 중인 주행을 브라우저에 계속 보관 → 새로 고침·브라우저 종료 뒤에도 이어서 기록
+function saveNow(){
+  if(ride.state==='idle'){try{localStorage.removeItem('rideNow')}catch(e){}return}
+  const o=Object.assign({},ride,{trace:trace.slice(-300)});LS.set('rideNow',o);
+}
+function restoreRide(){
+  const o=LS.get('rideNow',null);
+  if(!o||!o.started||o.state==='idle'||Date.now()-o.started>24*3600e3)return;
+  trace=o.trace||[];delete o.trace;
+  Object.assign(ride,o,{state:'pause',autoPaused:false,lastDev:null});
+  showingExample=false;$('chartNote').textContent='실시간 · 1초 간격';
+  say('이전에 하던 주행('+fmtT(ride.elapsed)+', '+(ride.dist/1000).toFixed(2)+'km)을 불러왔습니다. “계속”을 누르면 이어서 기록합니다.','ok');
+}
+window.addEventListener('pagehide',saveNow);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)saveNow()});
 // 사이클링: 사람 효율 약 24% → 기계 일(kJ) ≈ 소모 kcal
 function kcal(){return ride.kj>0?ride.kj:ride.dist/1000*25}
 // 심박 기준 (Keytel 2005 공식, 총 소모) − 안정 시 소모(체중×1kcal/kg/시간) = 활동 칼로리
@@ -549,13 +601,17 @@ setInterval(()=>{
   powBuf.push(live.power);if(powBuf.length>3)powBuf.shift();
   if(ride.state==='run'){
     ride.elapsed++;
-    if(live.devDist!=null&&ride.devDist0!=null&&live.src==='FTMS')ride.dist=Math.max(ride.dist,live.devDist-ride.devDist0);
-    else ride.dist+=live.spd/3.6;
+    let add=null;
+    if(live.src==='FTMS'&&live.devDist!=null&&bikeDev){
+      if(ride.lastDev!=null){const d=live.devDist-ride.lastDev;if(d>=0&&d<60)add=d}
+      ride.lastDev=live.devDist}
+    ride.dist+=add!=null?add:live.spd/3.6;
     ride.kj+=live.power/1000;ride.sumP+=live.power;ride.maxP=Math.max(ride.maxP,live.power);
     if(live.cad>0){ride.sumC+=live.cad;ride.nC++}
     if(live.hr){ride.sumH+=live.hr;ride.nH++;if(hrReady())ride.hrKcal+=hrKcalPerMin(live.hr)/60}
     if(ride.elapsed%5===0)ride.samples.push([ride.elapsed,Math.round(live.power),Math.round(live.cad),live.hr||'',+(ride.dist/1000).toFixed(3)]);
     trace.push({p:live.power,c:live.cad,h:live.hr});if(trace.length>300)trace.shift();
+    if(ride.elapsed%5===0)saveNow();
   }else if(!showingExample&&ride.state==='idle'&&(bikeDev||demoTimer)){
     trace.push({p:live.power,c:live.cad,h:live.hr});if(trace.length>300)trace.shift();
   }
@@ -619,14 +675,16 @@ $('btnLocal').addEventListener('click',()=>$('fileIn').click());
 $('fileIn').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;
   if(fileUrl)URL.revokeObjectURL(fileUrl);fileUrl=URL.createObjectURL(f);fileKey='f:'+f.name+':'+f.size;$('ytUrl').value='';
   $('vNote').textContent='선택한 영상: '+f.name;});
+function curKey(){const id=ytId($('ytUrl').value);return id?'yt:'+id:(fileUrl?fileKey:null)}
 function buildMedia(){
+  savePos();
   const box=$('rvMedia');box.innerHTML='';media=null;lastRate=null;lastPlay=null;
   const id=ytId($('ytUrl').value);
-  const key=id?'yt:'+id:(fileUrl?fileKey:null);
+  const key=curKey();
   const start=key?(LS.get('vpos',{})[key]||0):0; // 지난번에 멈춘 위치(초)
   if(id){LS.set('ytUrl',$('ytUrl').value);
     const f=document.createElement('iframe');
-    f.src=`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&loop=1&playlist=${id}&modestbranding=1`+(start>5?`&start=${Math.floor(start)}`:'');
+    f.src=`https://www.youtube.com/embed/${id}?autoplay=1&controls=0&rel=0&playsinline=1&enablejsapi=1&loop=1&playlist=${id}&modestbranding=1`+(/^https?:/.test(location.origin)?'&origin='+encodeURIComponent(location.origin):'')+(start>5?`&start=${Math.floor(start)}`:'');
     f.allow='autoplay; fullscreen; encrypted-media';f.referrerPolicy='strict-origin-when-cross-origin';
     box.appendChild(f);media={type:'yt',el:f,key,t:start,heard:false};
     f.addEventListener('load',ytListen);
@@ -657,7 +715,7 @@ window.addEventListener('message',e=>{
 function savePos(){
   if(!media||!media.key)return;
   if(media.type==='file'){if(!media.el.currentTime)return;media.t=media.el.currentTime}
-  else if(!media.heard)return;
+  else if(!media.heard&&!(media.t>0))return;
   const m=LS.get('vpos',{});delete m[media.key];m[media.key]=Math.floor(media.t);
   const ks=Object.keys(m);while(ks.length>30)delete m[ks.shift()];
   LS.set('vpos',m);
@@ -670,7 +728,7 @@ function seekStart(){
 window.addEventListener('pagehide',savePos);
 function syncVideo(){
   if(rv.hidden||!media)return;
-  if(media.type==='yt'&&!media.heard)ytListen();
+  if(media.type==='yt'&&!media.heard){ytListen();if(lastPlay)media.t+=1.5*(lastRate||1)} // 위치 응답이 없으면 재생 시간으로 추정
   savePos();
   if(ride.state==='pause'){setPlay(false);return}
   if(!$('sync').checked){setPlay(true);return}
@@ -680,13 +738,16 @@ function syncVideo(){
 setInterval(syncVideo,1500);
 
 $('btnRide').addEventListener('click',async()=>{
-  buildMedia();rv.hidden=false;wake();
+  if(!media||media.key!==curKey())buildMedia();else{lastPlay=null;lastRate=null}
+  rv.hidden=false;wake();syncVideo();
   try{await rv.requestFullscreen({navigationUI:'hide'})}catch(e){}
   renderHudCtl();render();
 });
-function exitRide(){savePos();rv.hidden=true;$('rvMedia').innerHTML='';media=null;if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
+function exitRide(){savePos();setPlay(false);rv.hidden=true;saveNow();if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})}
 $('hExit').addEventListener('click',exitRide);
-document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&!rv.hidden)exitRide()});
+// 전체화면이 풀려도(블루투스 창, Esc 등) 주행 화면과 영상은 그대로 유지
+document.addEventListener('fullscreenchange',()=>{$('hFull').hidden=!!document.fullscreenElement});
+$('hFull').addEventListener('click',()=>{rv.requestFullscreen({navigationUI:'hide'}).catch(()=>{})});
 $('hHide').addEventListener('click',()=>rv.classList.toggle('nohud'));
 $('hStart').addEventListener('click',toggleRun);
 function toggleRun(){ride.state==='run'?$('btnPause').click():$('btnStart').click();renderHudCtl();syncVideo()}
@@ -801,6 +862,6 @@ $('delYes').addEventListener('click',()=>{LS.set('rides',LS.get('rides',[]).filt
 $('delNo').addEventListener('click',()=>{$('delBox').hidden=true});
 
 if(!navigator.bluetooth&&/iPhone|iPad/.test(navigator.userAgent))say('아이폰 사파리·크롬은 웹 블루투스를 지원하지 않습니다. Bluefy 브라우저 앱으로 열거나, 노트북 크롬에서 열어 주세요. 데모 주행은 지금 바로 볼 수 있습니다.');
-renderHist();syncBtns();setMode('manual',true);refreshCtrlInfo();render();
+restoreRide();renderHist();syncBtns();setMode('manual',true);refreshCtrlInfo();render();
 })();
 </script>
